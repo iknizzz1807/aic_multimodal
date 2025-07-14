@@ -1,0 +1,88 @@
+# Data folder - chứa dataset và media files
+data/
+
+# Output folder - chứa các file được generate
+output/
+
+# Model cache
+models/
+*.pth
+*.bin
+*.safetensors
+
+# FAISS indexes
+*.index
+*.faiss
+
+# Transcripts
+transcripts/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.flac
+*.m4a
+
+# Images
+# *.jpg
+# *.jpeg
+# *.png
+# *.gif
+# *.bmp
+
+# Jupyter Notebooks checkpoints
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local

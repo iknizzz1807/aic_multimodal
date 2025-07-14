@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Multimodal Search</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>AI Multimodal Search</h1>
+        <p>Search images using natural language</p>
+      </header>
+
+      <div class="search-section">
+        <div class="search-box">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Describe what you're looking for... (e.g., 'a cat sleeping', 'red car')"
+            autocomplete="off"
+          />
+          <button id="searchBtn" onclick="search()">Search</button>
+        </div>
+
+        <div class="options">
+          <label
+            >Results:
+            <select id="topK">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+            </select>
+          </label>
+          <span id="status" class="status"></span>
+        </div>
+      </div>
+
+      <div id="results" class="results-grid"></div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
