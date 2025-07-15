@@ -1,63 +1,123 @@
 import os
 import json
 from typing import List, Optional, Dict
+
 import faiss
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.image_processor import ImageProcessor
+from src import config
 
-# Set environment variable
+# Đảm bảo thư viện MKL không gây lỗi trên một số hệ thống
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
+class SearchQuery(BaseModel):
+    text: str = Field(
+        ...,
+        description="Natural language description",
+        example="a person walking on the beach",
+    )
+    top_k: int = Field(default=12, ge=1, le=50, description="Number of results (1-50)")
+
+
+class VisualResult(BaseModel):
+    id: str = Field(description="Image/Video identifier")
+    score: float = Field(description="Similarity score")
+    timestamp: Optional[float] = Field(description="Timestamp in video if applicable")
+    image: Optional[str] = Field(
+        description="Base64-encoded image data of the specific frame"
+    )
+
+
+class AudioResult(BaseModel):
+    id: str = Field(description="Video/Audio identifier")
+    score: float = Field(description="Match score (naive implementation)")
+    match: str = Field(description="The matched text segment")
+    start: float = Field(description="Start time of the segment")
+    end: float = Field(description="End time of the segment")
+
+
+class UnifiedResult(BaseModel):
+    id: str = Field(description="Video/Media identifier")
+    score: float = Field(description="Final fused score from Reciprocal Rank Fusion")
+    reason: List[str] = Field(
+        description="Reasons for the match (e.g., ['visual', 'audio'])"
+    )
+    image: Optional[str] = Field(
+        description="Base64-encoded thumbnail for the media item"
+    )
+
+
+class VisualSearchResponse(BaseModel):
+    results: List[VisualResult]
+
+
+class AudioSearchResponse(BaseModel):
+    results: List[AudioResult]
+
+
+class UnifiedSearchResponse(BaseModel):
+    results: List[UnifiedResult]
+
+
+# --- API Server Class ---
+
+
 class APIServer:
-    """FastAPI server for multimodal search"""
+    """FastAPI server cho tìm kiếm đa phương tiện."""
 
-    def __init__(
-        self,
-        index_file: str = "output/faiss_visual.index",
-        mapping_file: str = "output/index_to_path.json",
-        transcript_dir: str = "output/transcripts",
-        model_id: str = "openai/clip-vit-base-patch32",
-    ):
-        """
-        Initialize API server
+    def __init__(self):
+        """Khởi tạo server, tải model và các file index."""
+        # Load cấu hình từ config.py
+        self.visual_index_file = config.VISUAL_INDEX_FILE
+        self.mapping_file = config.MEDIA_DATA_MAPPING_FILE
+        self.transcript_dir = config.TRANSCRIPT_DIR
 
-        Args:
-            index_file: Path to FAISS index file
-            mapping_file: Path to index mapping JSON file
-            transcript_dir: Directory containing transcript files
-            model_id: CLIP model identifier
-        """
-        self.index_file = index_file
-        self.mapping_file = mapping_file
-        self.transcript_dir = transcript_dir  # Lưu lại đường dẫn
-
-        # Initialize processors
         print("Initializing image processor...")
-        self.image_processor = ImageProcessor(model_id)
+        self.image_processor = ImageProcessor(config.CLIP_MODEL_ID)
 
-        # Load FAISS index and mapping
-        print("Loading FAISS index and mapping...")
-        self.index = faiss.read_index(index_file)
-        with open(mapping_file, "r") as f:
-            self.index_to_path = json.load(f)
-        print(f"✅ Loaded index with {self.index.ntotal} vectors")
+        print("Loading FAISS index and media data mapping...")
+        self.index = faiss.read_index(self.visual_index_file)
+        with open(self.mapping_file, "r", encoding="utf-8") as f:
+            self.index_to_media_data = json.load(f)
+        print(f"✅ Loaded index with {self.index.ntotal} vectors.")
 
-        # Tải tất cả các transcript vào bộ nhớ
+        # Tối ưu: Tạo mapping để tra cứu thumbnail nhanh (O(1) lookup)
+        print("Creating media to thumbnail mapping for fast lookups...")
+        self.media_id_to_thumbnail_path = self._create_thumbnail_mapping()
+        print(
+            f"✅ Created thumbnail mapping for {len(self.media_id_to_thumbnail_path)} media items."
+        )
+
         print("Loading audio transcripts...")
         self.transcripts = self._load_transcripts()
         print(f"✅ Loaded {len(self.transcripts)} transcripts.")
 
-        # Initialize FastAPI app
         self.app = self._create_app()
 
-    # Hàm để tải transcript
+    def _create_thumbnail_mapping(self) -> Dict[str, str]:
+        """
+        Tạo dictionary map từ media_id sang đường dẫn ảnh thumbnail.
+        Điều này giải quyết vấn đề hiệu năng được ghi trong todo.md.
+        Với video, nó sẽ lấy frame đầu tiên được index.
+        Với ảnh, nó sẽ lấy chính đường dẫn ảnh đó.
+        """
+        mapping = {}
+        # Sắp xếp theo timestamp để đảm bảo lấy frame sớm nhất cho video
+        sorted_media_data = sorted(
+            self.index_to_media_data.values(), key=lambda x: x.get("timestamp") or 0
+        )
+        for data in sorted_media_data:
+            media_id = data["media_id"]
+            if media_id not in mapping:
+                mapping[media_id] = data["path"]
+        return mapping
+
     def _load_transcripts(self) -> Dict[str, List[Dict]]:
-        """Load all JSON transcripts from the output directory."""
+        """Tải tất cả các file transcript từ thư mục output."""
         transcripts = {}
         if not os.path.exists(self.transcript_dir):
             print(f"⚠️ Transcript directory not found: {self.transcript_dir}")
@@ -65,33 +125,32 @@ class APIServer:
 
         for filename in os.listdir(self.transcript_dir):
             if filename.endswith(".json"):
-                # Lấy tên file media gốc (vd: video999.json -> video999)
-                media_name = os.path.splitext(filename)[0]
+                # Tên file transcript (bỏ .json) phải khớp với tên file media (bỏ .mp4, .jpg...)
+                base_name = os.path.splitext(filename)[0]
 
-                # Tìm đường dẫn file media đầy đủ trong mapping
-                # Điều này giả định file media (mp4) cũng có trong data
-                # và đã được index (ít nhất 1 frame) trong faiss_visual.index
-                original_path = None
-                for path in self.index_to_path.values():
-                    if os.path.splitext(os.path.basename(path))[0] == media_name:
-                        original_path = os.path.basename(path)
-                        break
+                # Tìm media_id đầy đủ (ví dụ: my_video.mp4) từ key của dict thumbnail
+                matching_media_id = next(
+                    (
+                        key
+                        for key in self.media_id_to_thumbnail_path
+                        if os.path.splitext(key)[0] == base_name
+                    ),
+                    None,
+                )
 
-                if original_path:
+                if matching_media_id:
+                    file_path = os.path.join(self.transcript_dir, filename)
                     try:
-                        with open(
-                            os.path.join(self.transcript_dir, filename),
-                            "r",
-                            encoding="utf-8",
-                        ) as f:
-                            transcripts[original_path] = json.load(f)
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            transcripts[matching_media_id] = json.load(f)
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding JSON from {filename}: {e}")
                     except Exception as e:
                         print(f"Error loading transcript {filename}: {e}")
-
         return transcripts
 
     def _create_app(self) -> FastAPI:
-        """Create and configure FastAPI application"""
+        """Tạo và cấu hình ứng dụng FastAPI."""
         app = FastAPI(
             title="AI Multimodal Search API",
             description="""
@@ -105,9 +164,8 @@ class APIServer:
             - 🗣️ Audio search in video transcripts
             - 🚀 Unified search combining visual and audio modalities
             """,
-            version="1.1.0",  # CẬP NHẬT: Tăng phiên bản
+            version="2.0.0",
         )
-
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
@@ -115,192 +173,128 @@ class APIServer:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-
         self._add_routes(app)
         return app
 
     def _add_routes(self, app: FastAPI):
-        """Add API routes to FastAPI app"""
+        """Thêm các route vào ứng dụng FastAPI."""
+        app.get("/")(self.root)
+        app.post("/search_visual", response_model=VisualSearchResponse)(
+            self.search_visual
+        )
+        app.post("/search_audio", response_model=AudioSearchResponse)(self.search_audio)
+        app.post("/unified_search", response_model=UnifiedSearchResponse)(
+            self.unified_search
+        )
 
-        # Pydantic models
-        class SearchQuery(BaseModel):
-            text: str = Field(
-                ...,
-                description="Natural language description",
-                example="red car on street",
-            )
-            top_k: int = Field(
-                default=10, ge=1, le=50, description="Number of results (1-50)"
-            )
+    # --- API Endpoint Logic ---
 
-        class VisualResult(BaseModel):
-            id: str = Field(description="Image/Video identifier")
-            score: float = Field(description="Similarity score")
-            timestamp: Optional[float] = Field(
-                description="Timestamp in video if applicable"
-            )
-            image: Optional[str] = Field(description="Base64-encoded image data")
+    def root(self):
+        """Kiểm tra health và thông tin cơ bản của API."""
+        return {
+            "message": "AI Multimodal Search API is running!",
+            "status": "ok",
+            "version": "2.0.0",
+            "indexed_visuals": len(self.index_to_media_data),
+            "indexed_audios": len(self.transcripts),
+            "model_info": self.image_processor.get_model_info(),
+        }
 
-        class AudioResult(BaseModel):
-            id: str = Field(description="Video/Audio identifier")
-            score: float = Field(description="Match score")
-            match: str = Field(description="The matched text segment")
-            start: float = Field(description="Start time of the segment")
-            end: float = Field(description="End time of the segment")
-
-        class UnifiedResult(BaseModel):
-            id: str = Field(description="Video/Media identifier")
-            score: float = Field(description="Final fused score")
-            reason: List[str] = Field(
-                description="Reasons for the match (visual, audio)"
-            )
-            image: Optional[str] = Field(description="Base64-encoded thumbnail")
-
-        class VisualSearchResponse(BaseModel):
-            results: List[VisualResult]
-
-        class AudioSearchResponse(BaseModel):
-            results: List[AudioResult]
-
-        class UnifiedSearchResponse(BaseModel):
-            results: List[UnifiedResult]
-
-        # Routes
-        @app.get("/")
-        def root():
-            """API health check and basic info"""
-            return {
-                "message": "AI Multimodal Search API is running!",
-                "status": "ok",
-                "version": "1.1.0",
-                "indexed_visuals": len(self.index_to_path),
-                "indexed_audios": len(self.transcripts),
-                "model_info": self.image_processor.get_model_info(),
-            }
-
-        # ... (endpoint /stats và /image/{filename} giữ nguyên) ...
-
-        @app.post("/search_visual", response_model=VisualSearchResponse)
-        def search_visual(query: SearchQuery):
-            """Search for images/video frames using natural language"""
-            return self._search_visual(query.text, query.top_k)
-
-        # Endpoint tìm kiếm audio
-        @app.post("/search_audio", response_model=AudioSearchResponse)
-        def search_audio(query: SearchQuery):
-            """Search for spoken text in video transcripts"""
-            return self._search_audio(query.text, query.top_k)
-
-        # Endpoint tìm kiếm hợp nhất
-        @app.post("/unified_search", response_model=UnifiedSearchResponse)
-        def unified_search(query: SearchQuery):
-            """Perform a unified search across visual and audio modalities"""
-            print(f"🚀 Performing unified search for: '{query.text}'")
-
-            # 1. Thực hiện tìm kiếm trên từng modality (lấy nhiều hơn top_k để fusion)
-            visual_results_data = self._search_visual(query.text, top_k=50)
-            audio_results_data = self._search_audio(query.text, top_k=50)
-
-            # 2. Hợp nhất kết quả bằng RRF
-            fused_scores = self._fuse_results_rrf(
-                visual_results_data["results"], audio_results_data["results"]
-            )
-
-            # 3. Chuẩn bị kết quả cuối cùng
-            final_results = []
-            sorted_media = sorted(
-                fused_scores.items(), key=lambda item: item[1]["score"], reverse=True
-            )
-
-            for media_id, data in sorted_media[: query.top_k]:
-                # Lấy ảnh thumbnail cho kết quả
-                image_base64 = None
-                for index, path in self.index_to_path.items():
-                    if os.path.basename(path) == media_id:
-                        image_base64 = ImageProcessor.image_to_base64(path)
-                        break
-
-                final_results.append(
-                    UnifiedResult(
-                        id=media_id,
-                        score=data["score"],
-                        reason=data["reason"],
-                        image=image_base64,
-                    )
-                )
-
-            return {"results": final_results}
-
-    # Đổi tên _search_images thành _search_visual để nhất quán
-    def _search_visual(self, text: str, top_k: int = 10) -> dict:
-        """Internal method to search for images/frames"""
-        print(f"🔍 Visual search for: '{text}' (top_k={top_k})")
+    def search_visual(self, query: SearchQuery) -> Dict:
+        """Tìm kiếm hình ảnh/frame video dựa trên mô tả văn bản."""
+        print(f"🔍 Visual search for: '{query.text}' (top_k={query.top_k})")
         try:
-            query_vector = self.image_processor.text_to_embedding(text)
-            distances, indices = self.index.search(query_vector, top_k)
+            query_vector = self.image_processor.text_to_embedding(query.text)
+            distances, indices = self.index.search(query_vector, query.top_k)
 
             results = []
             for i in range(len(indices[0])):
-                result_index = str(indices[0][i])
-                # mapping của bạn lưu key là string {"0": "path"}
-                result_path = self.index_to_path.get(result_index)
+                idx_str = str(indices[0][i])
+                media_data = self.index_to_media_data.get(idx_str)
 
-                if result_path:
-                    filename = os.path.basename(result_path)
-                    score = float(distances[0][i])
-
-                    # Giả định mapping lưu thông tin timestamp nếu là video
-                    # Trong low_implementation.md, bạn sẽ cần cập nhật indexer_visual.py
-                    # để lưu `{"video_path": path, "timestamp_sec": sec}`
-                    # Ở đây ta tạm bỏ qua timestamp cho đơn giản
-
-                    result_data = {"id": filename, "score": score, "timestamp": None}
-                    image_base64 = ImageProcessor.image_to_base64(result_path)
-                    if image_base64:
-                        result_data["image"] = image_base64
-                    results.append(result_data)
+                if media_data:
+                    result_item = VisualResult(
+                        id=media_data["media_id"],
+                        score=float(distances[0][i]),
+                        timestamp=media_data.get("timestamp"),
+                        image=ImageProcessor.image_to_base64(media_data["path"]),
+                    )
+                    results.append(result_item)
 
             return {"results": results}
         except Exception as e:
             print(f"❌ Error in visual search: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    #  Hàm tìm kiếm audio
-    def _search_audio(self, text: str, top_k: int = 10) -> dict:
-        """Internal method to search through transcripts (naive implementation)."""
-        print(f"🗣️ Audio search for: '{text}' (top_k={top_k})")
-
-        # Đây là cách tìm kiếm tuần tự, chậm với dữ liệu lớn.
-        # Giải pháp tốt hơn là dùng Elasticsearch/OpenSearch.
-
+    def search_audio(self, query: SearchQuery) -> Dict:
+        """Tìm kiếm trong transcript (triển khai đơn giản)."""
+        print(f"🗣️ Audio search for: '{query.text}' (top_k={query.top_k})")
+        # Vấn đề: Tìm kiếm tuần tự, chậm với dữ liệu lớn.
+        # Gợi ý: Dùng Elasticsearch/OpenSearch để cải thiện.
         found_matches = []
-        query_lower = text.lower()
+        query_lower = query.text.lower()
 
         for media_id, segments in self.transcripts.items():
             for segment in segments:
                 if query_lower in segment["text"].lower():
-                    # Gán điểm đơn giản, mỗi lần tìm thấy là 1 điểm
                     found_matches.append(
-                        {
-                            "id": media_id,
-                            "score": 1.0,
-                            "match": segment["text"],
-                            "start": segment["start"],
-                            "end": segment["end"],
-                        }
+                        AudioResult(
+                            id=media_id,
+                            score=1.0,  # Điểm số đơn giản
+                            match=segment["text"],
+                            start=segment["start"],
+                            end=segment["end"],
+                        )
                     )
 
-        # Vì cách tính điểm đơn giản, ta chỉ trả về top_k kết quả đầu tiên tìm thấy
-        return {"results": found_matches[:top_k]}
+        return {"results": found_matches[: query.top_k]}
 
-    # Hàm hợp nhất kết quả
+    def unified_search(self, query: SearchQuery) -> Dict:
+        """Thực hiện tìm kiếm hợp nhất trên cả hình ảnh và âm thanh."""
+        print(f"🚀 Performing unified search for: '{query.text}'")
+
+        # 1. Tìm kiếm trên từng modality (lấy nhiều hơn top_k để fusion)
+        visual_results_data = self.search_visual(SearchQuery(text=query.text, top_k=50))
+        audio_results_data = self.search_audio(SearchQuery(text=query.text, top_k=50))
+
+        # 2. Hợp nhất kết quả bằng Reciprocal Rank Fusion
+        fused_scores = self._fuse_results_rrf(
+            visual_results_data["results"], audio_results_data["results"]
+        )
+
+        # 3. Sắp xếp và chuẩn bị kết quả cuối cùng
+        final_results = []
+        sorted_media = sorted(
+            fused_scores.items(), key=lambda item: item[1]["score"], reverse=True
+        )
+
+        for media_id, data in sorted_media[: query.top_k]:
+            # Lấy thumbnail hiệu quả bằng O(1) lookup
+            thumbnail_path = self.media_id_to_thumbnail_path.get(media_id)
+            image_base64 = (
+                ImageProcessor.image_to_base64(thumbnail_path)
+                if thumbnail_path
+                else None
+            )
+
+            final_results.append(
+                UnifiedResult(
+                    id=media_id,
+                    score=data["score"],
+                    reason=sorted(data["reason"]),  # Sắp xếp để output nhất quán
+                    image=image_base64,
+                )
+            )
+
+        return {"results": final_results}
+
     def _fuse_results_rrf(
-        self, visual_results: List, audio_results: List, k: int = 60
+        self, visual_results: List[Dict], audio_results: List[Dict], k: int = 60
     ) -> Dict:
-        """Fuse results from different modalities using Reciprocal Rank Fusion (RRF)."""
+        """Hợp nhất kết quả bằng Reciprocal Rank Fusion (RRF)."""
         fused_scores = {}
 
-        # Process visual results
+        # Xử lý kết quả hình ảnh
         for rank, res in enumerate(visual_results):
             media_id = res["id"]
             if media_id not in fused_scores:
@@ -311,7 +305,7 @@ class APIServer:
             if "visual" not in fused_scores[media_id]["reason"]:
                 fused_scores[media_id]["reason"].append("visual")
 
-        # Process audio results
+        # Xử lý kết quả âm thanh
         for rank, res in enumerate(audio_results):
             media_id = res["id"]
             if media_id not in fused_scores:
@@ -324,27 +318,11 @@ class APIServer:
 
         return fused_scores
 
-    def run(self, host: str = "127.0.0.1", port: int = 8000):
-        """Run the API server"""
+    def run(self, host: str, port: int):
+        """Chạy API server."""
         import uvicorn
 
         print("🚀 Starting API server...")
         print(f"Server running at: http://{host}:{port}")
+        print(f"Access API docs at: http://{host}:{port}/docs")
         uvicorn.run(self.app, host=host, port=port)
-
-
-# Main execution
-if __name__ == "__main__":
-    # Configuration
-    INDEX_FILE = "output/faiss_visual.index"
-    MAPPING_FILE = "output/index_to_path.json"
-    TRANSCRIPT_DIR = "output/transcripts"
-    MODEL_ID = "openai/clip-vit-base-patch32"
-
-    server = APIServer(
-        index_file=INDEX_FILE,
-        mapping_file=MAPPING_FILE,
-        transcript_dir=TRANSCRIPT_DIR,
-        model_id=MODEL_ID,
-    )
-    server.run()

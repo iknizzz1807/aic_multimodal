@@ -2,12 +2,14 @@ import os
 import json
 import whisper
 import torch
+import subprocess
+import json
+
+from src import config
 
 
 class AudioIndexer:
-    """Handles audio transcription using Whisper"""
-
-    def __init__(self, model_id: str = "base"):
+    def __init__(self, model_id: str = config.WHISPER_MODEL_ID):
         """
         Initialize audio indexer with a Whisper model.
 
@@ -24,19 +26,42 @@ class AudioIndexer:
         self.model = whisper.load_model(self.model_id, device=self.device)
         print("✅ Whisper model loaded")
 
+    def _has_audio_stream(self, video_path: str) -> bool:
+        """
+        Kiểm tra xem file media có luồng âm thanh hay không bằng ffprobe.
+        Yêu cầu ffprobe (một phần của ffmpeg) phải được cài đặt và có trong PATH.
+        """
+        try:
+            command = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_type",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ]
+            # Chạy lệnh và lấy output
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            # Nếu có output (vd: 'audio') thì có luồng âm thanh
+            return len(result.stdout.strip()) > 0
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # CalledProcessError: ffprobe chạy nhưng trả về lỗi (vd: file không có luồng audio)
+            # FileNotFoundError: không tìm thấy lệnh ffprobe
+            return False
+
     def transcribe_media_from_directory(
         self,
-        media_directory: str,
-        output_directory: str = "output/transcripts",
-        media_extensions: tuple = (".mp4", ".mp3", ".wav", ".m4a"),
+        media_directory: str = config.DATA_DIR,
+        output_directory: str = config.TRANSCRIPT_DIR,
+        media_extensions: tuple = config.MEDIA_EXTENSIONS,
     ):
         """
-        Transcribe all media files in a directory.
-
-        Args:
-            media_directory: Directory containing media files.
-            output_directory: Directory to save transcript JSON files.
-            media_extensions: Tuple of valid media file extensions.
+        Bóc tách audio từ tất cả các file media trong thư mục.
+        CẬP NHẬT: Xử lý nhẹ nhàng các video không có âm thanh.
         """
         print(f"🔍 Transcribing media from directory: {media_directory}")
         os.makedirs(output_directory, exist_ok=True)
@@ -48,34 +73,68 @@ class AudioIndexer:
         ]
 
         if not media_files:
-            print("❌ No media files found in directory.")
+            print("🔵 No media files found in directory.")
             return
 
         print(f"📁 Found {len(media_files)} media files to process.")
         total = len(media_files)
+        transcribed_count = 0
+        skipped_count = 0
 
         for i, path in enumerate(media_files):
-            try:
-                print(f"   Processing {i+1}/{total}: {os.path.basename(path)}")
+            print(
+                f"   Processing {i+1}/{total}: {os.path.basename(path)}",
+                end="",
+                flush=True,
+            )
 
-                # Perform transcription
-                result = self.model.transcribe(path, fp16=torch.cuda.is_available())
-
-                # Get the original filename without extension
-                base_filename = os.path.splitext(os.path.basename(path))[0]
-                output_path = os.path.join(output_directory, f"{base_filename}.json")
-
-                # Save the segments which include text and timestamps
-                with open(output_path, "w", encoding="utf-8") as f:
-                    json.dump(result["segments"], f, ensure_ascii=False, indent=2)
-
-                print(f"   ✅ Saved transcript to: {output_path}")
-
-            except Exception as e:
-                print(f"   ❌ Error processing {path}: {e}")
+            # CẬP NHẬT: Kiểm tra xem file json đã tồn tại chưa để bỏ qua
+            base_filename = os.path.splitext(os.path.basename(path))[0]
+            output_path = os.path.join(output_directory, f"{base_filename}.json")
+            if os.path.exists(output_path):
+                print("... ⏩ Already transcribed, skipping.")
+                transcribed_count += 1
                 continue
 
+            # CẬP NHẬT: Kiểm tra luồng audio
+            if path.lower().endswith(
+                config.VIDEO_EXTENSIONS
+            ) and not self._has_audio_stream(path):
+                print("... 🔇 No audio stream found, skipping.")
+                skipped_count += 1
+                continue
+
+            try:
+                # Thực hiện bóc tách
+                result = self.model.transcribe(path, fp16=torch.cuda.is_available())
+
+                # Lưu kết quả
+                with open(output_path, "w", encoding="utf-8") as f:
+                    # Chỉ lưu nếu có text, tránh tạo file rỗng
+                    if result["text"].strip():
+                        json.dump(result["segments"], f, ensure_ascii=False, indent=2)
+                        print(f" -> ✅ Saved transcript.")
+                        transcribed_count += 1
+                    else:
+                        print(" -> 📝 No speech detected, skipping file creation.")
+                        skipped_count += 1
+
+            except Exception as e:
+                # In lỗi gọn gàng hơn
+                error_message = str(e)
+                if "Failed to load audio" in error_message:
+                    print(
+                        " -> ❌ Error: Failed to load audio (likely corrupt or unsupported format)."
+                    )
+                else:
+                    print(f" -> ❌ An unexpected error occurred: {e}")
+                skipped_count += 1
+                continue
+
+        print("-" * 50)
         print("🎉 Transcription process completed!")
+        print(f"   - Transcribed/Already Existed: {transcribed_count}")
+        print(f"   - Skipped (No audio/Error): {skipped_count}")
 
 
 # Simple CLI - run this script to generate transcripts

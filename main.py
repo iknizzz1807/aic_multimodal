@@ -1,27 +1,42 @@
-"""
-AI Multimodal Search API
-Main entry point for the application
-"""
-
+import os
+import sys
 from src.api import APIServer
+from src import config
 
 
 def main():
-    """Main function to start the API server"""
-    # Config
-    INDEX_FILE = "output/faiss_visual.index"
-    MAPPING_FILE = "output/index_to_path.json"
-    TRANSCRIPT_DIR = "output/transcripts"
-    MODEL_ID = "openai/clip-vit-base-patch32"
+    """
+    Điểm khởi đầu chính của ứng dụng.
+    Kiểm tra các file index và khởi động API server.
+    """
+    print("--- AI Multimodal Search Server ---")
 
-    server = APIServer(
-        index_file=INDEX_FILE,
-        mapping_file=MAPPING_FILE,
-        transcript_dir=TRANSCRIPT_DIR,
-        model_id=MODEL_ID,
-    )
+    # Kiểm tra xem các file index cần thiết có tồn tại không
+    required_files = [config.VISUAL_INDEX_FILE, config.MEDIA_DATA_MAPPING_FILE]
+    missing_files = [f for f in required_files if not os.path.exists(f)]
 
-    server.run(host="127.0.0.1", port=8000)
+    if missing_files:
+        print("\n" + "=" * 60)
+        print("❌ CRITICAL ERROR: Index files not found!")
+        print("The following required files are missing:")
+        for f in missing_files:
+            print(f"  - {f}")
+
+        print("\n👉 Please build the index first by running:")
+        print("   python build_index.py")
+        print("=" * 60)
+        sys.exit(1)  # Thoát chương trình
+
+    print("\n✅ All required index files found. Initializing server...")
+
+    # Khởi tạo và chạy server
+    try:
+        server = APIServer()
+        server.run(host=config.API_HOST, port=config.API_PORT)
+    except Exception as e:
+        print(f"\n❌ An unexpected error occurred during server startup: {e}")
+        print("Please check your configuration and the error logs.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
