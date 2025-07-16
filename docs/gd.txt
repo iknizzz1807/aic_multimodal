@@ -1,0 +1,84 @@
+graph TD
+    subgraph "Giai Đoạn 1: Indexing (Offline) - Chạy build_index.py"
+        direction LR
+        
+        Input[("📁<br>Thư mục data/<br>chứa video.mp4, image.jpg")] --> PreProcess{{"⚙️<br><b>build_index.py</b><br>Khởi chạy xử lý"}}
+        
+        PreProcess --> AudioIndexer["<br><b>AudioIndexer</b><br>(Xử lý Âm thanh)"]
+        PreProcess --> VisualIndexer["<br><b>VisualIndexer</b><br>(Xử lý Hình ảnh)"]
+        
+        subgraph "Nhánh Audio"
+            direction TB
+            AudioIndexer --> Whisper[/"🤖<br><b>Whisper Model</b><br>Bóc tách lời thoại"/]
+            Whisper --> Transcripts[("📄<br><b>output/transcripts/</b><br>Các file {id}.json")]
+        end
+        
+        subgraph "Nhánh Visual"
+            direction TB
+            VisualIndexer --> OpenCV[/"⚙️<br><b>OpenCV</b><br>Trích xuất Frames từ Video"/]
+            OpenCV --> Frames[("🖼️<br><b>output/frames/</b><br>Các file frame.jpg")]
+            
+            Frames --> CLIP_Model
+            Input -- Ảnh tĩnh --> CLIP_Model[/"🤖<br><b>CLIP Model</b><br>Tạo Vector Embeddings"/]
+            
+            CLIP_Model --> FAISS[/"💾<br><b>FAISS</b><br>Xây dựng Chỉ mục Vector"/]
+            FAISS --> IndexFile[("📇<br><b>faiss_visual.index</b>")]
+            FAISS --> MappingFile[("🗺️<br><b>index_to_media_data.json</b>")]
+        end
+
+    end
+    
+    style Input fill:#e6fffa,stroke:#00796b
+    style PreProcess fill:#fff3e0,stroke:#f57c00
+    style AudioIndexer fill:#e3f2fd,stroke:#1976d2
+    style VisualIndexer fill:#e3f2fd,stroke:#1976d2
+    style Transcripts fill:#d1c4e9,stroke:#512da8
+    style IndexFile fill:#d1c4e9,stroke:#512da8
+    style MappingFile fill:#d1c4e9,stroke:#512da8
+    style Frames fill:#fce4ec,stroke:#c2185b
+
+graph TD
+    subgraph "Giai Đoạn 2: Searching (Online) - Chạy main.py"
+        direction TB
+
+        User(👨‍💻<br>Người dùng) -- "POST /unified_search<br>text_query: 'dog on beach'" --> API{"<br><b>APIServer</b><br>(FastAPI)"}
+
+        subgraph "Tải vào RAM lúc khởi động"
+            direction LR
+            TranscriptsDB[("📄<br>Transcripts")]
+            FAISS_DB[("📇<br>FAISS Index")]
+            Mapping_DB[("🗺️<br>Mapping Data")]
+        end
+        
+        TranscriptsDB -- Load --> API
+        FAISS_DB -- Load --> API
+        Mapping_DB -- Load --> API
+
+        API --> SearchAudio["<br><b>Tìm kiếm Audio</b><br>(Keyword Search)"]
+        API --> SearchVisual["<br><b>Tìm kiếm Visual</b><br>(Vector Search)"]
+        
+        subgraph "Tìm kiếm"
+            direction LR
+            SearchAudio -- "Dùng Transcripts trong RAM" --> AudioResults[("📋<br>Kết quả Audio<br>ID, start, end")]
+            
+            SearchVisual -- "Dùng FAISS & Mapping trong RAM" --> VisualResults[("📋<br>Kết quả Visual<br>ID, timestamp")]
+        end
+
+        AudioResults --> Fusion["<br><b>Hợp nhất (RRF)</b>"]
+        VisualResults --> Fusion["<br><b>Hợp nhất (RRF)</b>"]
+        
+        Fusion --> FinalList[("🏆<br>Danh sách<br>xếp hạng cuối cùng")]
+        FinalList -- "Phản hồi JSON" --> User
+
+    end
+
+    style User fill:#e6fffa,stroke:#00796b
+    style API fill:#fff3e0,stroke:#f57c00
+    style TranscriptsDB fill:#d1c4e9,stroke:#512da8
+    style FAISS_DB fill:#d1c4e9,stroke:#512da8
+    style Mapping_DB fill:#d1c4e9,stroke:#512da8
+    style SearchAudio fill:#e3f2fd,stroke:#1976d2
+    style SearchVisual fill:#e3f2fd,stroke:#1976d2
+    style Fusion fill:#ffcdd2,stroke:#d32f2f
+    style FinalList fill:#c8e6c9,stroke:#388e3c
+

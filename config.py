@@ -2,7 +2,7 @@ import os
 
 # --- Thư mục ---
 # Thư mục gốc của dự án
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Thư mục chứa dữ liệu đầu vào (video, ảnh)
 DATA_DIR = os.path.join(BASE_DIR, "data")

@@ -1,4 +1,6 @@
+// File: src/frontend/script.js (MODIFIED)
 const API_BASE_URL = "http://127.0.0.1:8000";
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv"];
 
 const searchInput = document.getElementById("searchInput");
 const searchBtn = document.getElementById("searchBtn");
@@ -6,12 +8,24 @@ const topKSelect = document.getElementById("topK");
 const statusElement = document.getElementById("status");
 const resultsContainer = document.getElementById("results");
 
-searchInput.addEventListener("keypress", (e) => e.key === "Enter" && search());
+// NEW: Modal elements
+const modal = document.getElementById("mediaModal");
+const modalTitle = document.getElementById("modalTitle");
+const modalMediaContainer = document.getElementById("modalMediaContainer");
+const modalDetails = document.getElementById("modalDetails");
+let currentResults = []; // Store current search results
 
+searchInput.addEventListener("keypress", (e) => e.key === "Enter" && search());
 window.addEventListener("load", () => {
   checkApiStatus();
   addSampleQueries();
 });
+// When the user clicks anywhere outside of the modal, close it
+window.onclick = function (event) {
+  if (event.target == modal) {
+    closeModal();
+  }
+};
 
 const sampleQueries = [
   "a cat sleeping",
@@ -82,7 +96,8 @@ async function search() {
     }
 
     const data = await response.json();
-    displayResults(data.results, query, searchType);
+    currentResults = data.results; // Store results
+    displayResults(currentResults, query, searchType);
   } catch (error) {
     console.error("Search error:", error);
     showError(`Failed to search: ${error.message}`);
@@ -132,7 +147,7 @@ function displayUnifiedResults(results) {
       (r, i) => `
     <div class="result-item" style="animation: fadeInUp 0.3s ease ${
       i * 0.05
-    }s both;">
+    }s both;" onclick="openModal(${i})">
       <img class="result-image" src="${r.image || placeholderImage}" alt="${
         r.id
       }" loading="lazy"/>
@@ -197,6 +212,78 @@ function displayAudioResults(results) {
     )
     .join("");
 }
+
+// --- NEW MODAL FUNCTIONS ---
+
+function openModal(resultIndex) {
+  const result = currentResults[resultIndex];
+  if (!result) return;
+
+  const mediaUrl = `${API_BASE_URL}/media/${result.id}`;
+  modalTitle.textContent = result.id;
+  modalMediaContainer.innerHTML = ""; // Clear previous content
+  document.querySelector("#modalDetails > div")?.remove(); // Clear previous details
+
+  const isVideo = VIDEO_EXTENSIONS.some((ext) =>
+    result.id.toLowerCase().endsWith(ext)
+  );
+
+  if (isVideo) {
+    modalMediaContainer.innerHTML = `<video id="modalVideoPlayer" src="${mediaUrl}" controls autoplay muted></video>`;
+  } else {
+    modalMediaContainer.innerHTML = `<img src="${mediaUrl}" alt="${result.id}" />`;
+  }
+
+  const detailsContainer = document.createElement("div");
+  modalDetails.appendChild(detailsContainer);
+
+  if (result.details && result.details.length > 0) {
+    detailsContainer.innerHTML = result.details
+      .map((detail) => {
+        let timeInfo,
+          textInfo = "";
+        if (detail.type === "visual") {
+          timeInfo = `@ ${detail.timestamp.toFixed(1)}s`;
+        } else {
+          timeInfo = `${detail.start_time.toFixed(
+            1
+          )}s - ${detail.end_time.toFixed(1)}s`;
+          textInfo = `<span class="detail-item-text">"${detail.text_match}"</span>`;
+        }
+
+        const seekTime =
+          detail.type === "visual" ? detail.timestamp : detail.start_time;
+
+        return `
+          <div class="detail-item" onclick="seekMedia(${seekTime})">
+            <span class="reason-tag ${detail.type}">${detail.type}</span>
+            <span class="detail-item-time">${timeInfo}</span>
+            ${textInfo}
+          </div>
+        `;
+      })
+      .join("");
+  } else {
+    detailsContainer.innerHTML = "<p>No specific match details available.</p>";
+  }
+
+  modal.style.display = "block";
+}
+
+function closeModal() {
+  modal.style.display = "none";
+  modalMediaContainer.innerHTML = ""; // Stop video/image loading
+}
+
+function seekMedia(time) {
+  const videoPlayer = document.getElementById("modalVideoPlayer");
+  if (videoPlayer) {
+    videoPlayer.currentTime = time;
+    videoPlayer.play();
+  }
+}
+
+// --- END NEW MODAL FUNCTIONS ---
 
 function showNoResults(query) {
   resultsContainer.innerHTML = `

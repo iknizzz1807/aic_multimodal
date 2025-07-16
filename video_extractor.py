@@ -1,15 +1,15 @@
 import os
 import cv2
 from typing import List
-from src import config
+import config
 
 
-class VideoIndexer:
+class VideoExtractor:
     """Trích xuất các khung hình (frames) từ video."""
 
     def __init__(self, frame_interval: float = config.VIDEO_FRAME_EXTRACTION_INTERVAL):
         """
-        Khởi tạo VideoIndexer.
+        Khởi tạo VideoExtractor.
 
         Args:
             frame_interval: Khoảng thời gian (giây) giữa các frame được trích xuất.

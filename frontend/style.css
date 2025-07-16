@@ -298,3 +298,134 @@ header p {
     font-size: 2em;
   }
 }
+
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding-top: 40px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: auto;
+  padding: 20px;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 1200px;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+  position: relative;
+}
+
+.modal-close {
+  color: #aaa;
+  position: absolute;
+  top: 10px;
+  right: 25px;
+  font-size: 35px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.modal-close:hover,
+.modal-close:focus {
+  color: black;
+  text-decoration: none;
+}
+
+.modal-body {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.modal-media-container {
+  flex: 3;
+}
+
+.modal-media-container video,
+.modal-media-container img {
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  border-radius: 8px;
+  background-color: #000;
+}
+
+.modal-details {
+  flex: 1;
+  max-height: 70vh;
+  overflow-y: auto;
+  border-left: 1px solid #eee;
+  padding-left: 20px;
+}
+
+.modal-details h4 {
+  margin-bottom: 15px;
+  color: #333;
+}
+
+#modalTitle {
+  font-size: 1.5em;
+  color: #444;
+  word-break: break-all;
+}
+
+.detail-item {
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: 1px solid #e0e0e0;
+}
+
+.detail-item:hover {
+  background-color: #f0f4ff;
+}
+
+.detail-item .reason-tag {
+  margin-right: 10px;
+}
+
+.detail-item-time {
+  font-weight: 500;
+  color: #667eea;
+}
+
+.detail-item-text {
+  font-size: 13px;
+  color: #666;
+  margin-top: 5px;
+  font-style: italic;
+  display: block;
+}
+
+@media (max-width: 992px) {
+  .modal-body {
+    flex-direction: column;
+  }
+  .modal-details {
+    border-left: none;
+    border-top: 1px solid #eee;
+    padding-left: 0;
+    padding-top: 20px;
+    max-height: 30vh;
+  }
+}

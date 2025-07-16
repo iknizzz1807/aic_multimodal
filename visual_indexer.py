@@ -3,9 +3,9 @@ import json
 from typing import List, Dict
 import faiss
 import numpy as np
-from src.image_processor import ImageProcessor
-from src.video_indexer import VideoIndexer
-from src import config
+from image_processor import ImageProcessor
+from video_extractor import VideoExtractor
+import config
 
 
 class VisualIndexer:
@@ -16,7 +16,7 @@ class VisualIndexer:
     def __init__(self, model_id: str = config.CLIP_MODEL_ID):
         self.model_id = model_id
         self.image_processor = ImageProcessor(model_id)
-        self.video_indexer = VideoIndexer()  # MỚI: Khởi tạo video indexer
+        self.video_indexer = VideoExtractor()  # MỚI: Khởi tạo video indexer
         self.index = None
         self.index_to_media_data = {}
         print("✅ Visual indexer initialized")
@@ -68,7 +68,11 @@ class VisualIndexer:
 
         # 5. Tạo index FAISS và file mapping mới
         success = self.create_faiss_index(
-            embeddings_dict, output_index_file, output_mapping_file, index_type
+            all_visual_data,
+            embeddings_dict,
+            output_index_file,
+            output_mapping_file,
+            index_type,
         )
         if success:
             print(f"✅ Index created successfully!")
@@ -100,6 +104,7 @@ class VisualIndexer:
 
     def create_faiss_index(
         self,
+        all_visual_data: List[Dict],
         embeddings_dict: Dict[str, np.ndarray],
         output_index_file: str,
         output_mapping_file: str,
@@ -112,15 +117,14 @@ class VisualIndexer:
             # Tạo thư mục output nếu chưa có
             os.makedirs(os.path.dirname(output_index_file), exist_ok=True)
 
-            # Lấy lại visual_data từ key của embeddings_dict để đảm bảo thứ tự
-            all_visual_data = (
-                static_image_data + video_frame_data
-            )  # Tái sử dụng từ hàm gọi
-
             # Lọc ra những item đã được tạo embedding thành công
             successful_data = [
                 d for d in all_visual_data if d["path"] in embeddings_dict
             ]
+
+            if not successful_data:
+                print("❌ No items were successfully processed to create an index.")
+                return False
 
             paths = [d["path"] for d in successful_data]
             vector_matrix = np.vstack([embeddings_dict[path] for path in paths])
@@ -161,8 +165,3 @@ class VisualIndexer:
         except Exception as e:
             print(f"❌ Error creating FAISS index: {e}")
             return False
-
-
-# ----- Các hàm khác như load_index, get_index_stats, ... giữ nguyên hoặc cập nhật nhỏ -----
-# Tôi sẽ lược bỏ chúng ở đây để cho gọn, bạn có thể tự cập nhật chúng để dùng
-# self.index_to_media_data thay cho self.index_to_path

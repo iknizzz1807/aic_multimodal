@@ -5,13 +5,14 @@ import torch
 import subprocess
 import json
 
-from src import config
+import config
 
 
-class AudioIndexer:
+class AudioExtractor:
     def __init__(self, model_id: str = config.WHISPER_MODEL_ID):
         """
-        Initialize audio indexer with a Whisper model.
+        Initialize audio extractor with a Whisper model.
+        Xử lý việc bóc tách audio từ video và chuyển đổi thành văn bản.
 
         Args:
             model_id: Whisper model size ('tiny', 'base', 'small', 'medium', 'large').
@@ -104,20 +105,22 @@ class AudioIndexer:
                 skipped_count += 1
                 continue
 
+            # === BẮT ĐẦU THAY THẾ TỪ ĐÂY ===
             try:
                 # Thực hiện bóc tách
                 result = self.model.transcribe(path, fp16=torch.cuda.is_available())
 
-                # Lưu kết quả
-                with open(output_path, "w", encoding="utf-8") as f:
-                    # Chỉ lưu nếu có text, tránh tạo file rỗng
-                    if result["text"].strip():
+                # Chỉ lưu nếu có text, tránh tạo file rỗng
+                if result and result["text"].strip():
+                    # Chỉ mở file để ghi KHI CÓ NỘI DUNG
+                    with open(output_path, "w", encoding="utf-8") as f:
                         json.dump(result["segments"], f, ensure_ascii=False, indent=2)
-                        print(f" -> ✅ Saved transcript.")
-                        transcribed_count += 1
-                    else:
-                        print(" -> 📝 No speech detected, skipping file creation.")
-                        skipped_count += 1
+                    print(f" -> ✅ Saved transcript.")
+                    transcribed_count += 1
+                else:
+                    # Không tạo file nếu không có lời thoại
+                    print(" -> 📝 No speech detected, skipping file creation.")
+                    skipped_count += 1
 
             except Exception as e:
                 # In lỗi gọn gàng hơn
@@ -157,6 +160,6 @@ if __name__ == "__main__":
         print(f"Please create the directory and add your video/audio files there.")
         exit(1)
 
-    # Create and run indexer
-    audio_indexer = AudioIndexer(model_id=MODEL_ID)
+    # Create and run extractor
+    audio_indexer = AudioExtractor(model_id=MODEL_ID)
     audio_indexer.transcribe_media_from_directory(DATA_DIR, OUTPUT_DIR)

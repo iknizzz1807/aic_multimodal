@@ -1,12 +1,12 @@
 import os
-from src.visual_indexer import VisualIndexer
-from src.audio_indexer import AudioIndexer
-from src import config
+from visual_indexer import VisualIndexer
+from audio_extractor import AudioIndexer
+import config
 
 
 def main():
     """
-    Chạy toàn bộ quá trình indexing:
+    Chạy toàn bộ quá trình sau:
     1. Bóc tách audio từ video/audio files.
     2. Index hình ảnh tĩnh và các frame trích xuất từ video.
     """
