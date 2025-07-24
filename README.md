@@ -13,3 +13,19 @@ python build_index.py
 ```bash
 python main.py
 ```
+
+### Phiên bản mới
+
+- Chạy docker của database trước rồi hãy làm gì thì làm
+
+```bash
+docker-compose up -d
+```
+
+- Chạy index data nếu chưa chạy
+
+```bash
+python -m processing.run_batch_processing
+```
+
+- Xem UI của Milvus trên cổng 8000

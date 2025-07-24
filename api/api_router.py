@@ -3,12 +3,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 import config
-from services.search_service import SearchService
+from core.search_service import SearchService
 from .dependencies import get_search_service
 from .schemas import (
     SearchQuery,
-    VisualSearchResponse,
-    AudioSearchResponse,
     UnifiedSearchResponse,
 )
 
@@ -21,42 +19,22 @@ def root(service: SearchService = Depends(get_search_service)):
     return service.get_server_info()
 
 
-@router.post("/search_visual", response_model=VisualSearchResponse)
-def search_visual(
-    query: SearchQuery, service: SearchService = Depends(get_search_service)
-):
-    """Tìm kiếm hình ảnh/frame video dựa trên mô tả văn bản."""
-    try:
-        results = service.perform_visual_search(query.text, query.top_k)
-        return {"results": results}
-    except Exception as e:
-        print(f"❌ Error in visual search: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/search_audio", response_model=AudioSearchResponse)
-def search_audio(
-    query: SearchQuery, service: SearchService = Depends(get_search_service)
-):
-    """Tìm kiếm trong transcript."""
-    try:
-        results = service.perform_audio_search(query.text, query.top_k)
-        return {"results": results}
-    except Exception as e:
-        print(f"❌ Error in audio search: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/unified_search", response_model=UnifiedSearchResponse)
-def unified_search(
+@router.post("/search", response_model=UnifiedSearchResponse)  # Đổi tên thành /search
+async def unified_search(  # Thêm async
     query: SearchQuery, service: SearchService = Depends(get_search_service)
 ):
     """Thực hiện tìm kiếm hợp nhất trên cả hình ảnh và âm thanh."""
     try:
-        results = service.perform_unified_search(query.text, query.top_k)
+        results = await service.perform_unified_search(
+            query.text, query.top_k
+        )  # Thêm await
         return {"results": results}
     except Exception as e:
+        # Log lỗi chi tiết hơn cho debug
+        import traceback
+
         print(f"❌ Error in unified search: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,4 +1,109 @@
-### **high_implementation_revised.md**
+Kiến trúc mới sẽ tập trung vào 3 phần chính:
+
+1.  **Pipeline xử lý offline nâng cao.**
+2.  **API Service hợp nhất, bất đồng bộ.**
+3.  **Logic tìm kiếm và tái xếp hạng chuyên sâu.**
+
+---
+
+### **Tổng quan Kế hoạch Triển khai (Đã điều chỉnh cho cuộc thi)**
+
+Kế hoạch này tập trung vào việc xây dựng một hệ thống tìm kiếm đa phương thức hiệu năng cao, tối ưu cho tốc độ phản hồi và độ chính xác của một request duy nhất.
+
+---
+
+### **Giai đoạn 1: Xây dựng Pipeline Xử lý Dữ liệu Nâng cao**
+
+**Mục tiêu:** Thực hiện một lần duy nhất (offline) để biến đổi dữ liệu thô thành các chỉ mục (index) thông minh, giàu thông tin, sẵn sàng cho việc truy vấn tốc độ cao. Đây là nền tảng quan trọng nhất cho độ chính xác.
+
+#### **Các bước thực hiện:**
+
+1.  **Thiết lập Cơ sở dữ liệu:**
+
+    - Sử dụng Docker để khởi chạy **Milvus** (Vector DB) và **Elasticsearch** (Text Search Engine).
+    - Trong code, định nghĩa schema cho các collection/index:
+      - Milvus `visual_collection`: Lưu vector hình ảnh, có các trường `media_id`, `timestamp`, `vector`, và các trường metadata nâng cao như `quality_score`.
+      - **(Nâng cao)** Milvus `audio_events_collection`: Lưu vector sự kiện âm thanh.
+      - Elasticsearch `transcripts_index`: Lưu lời thoại đã bóc tách, có các trường `media_id`, `start`, `end`, `text`.
+
+2.  **Xây dựng Script Xử lý Song song (`processing/run_batch_processing.py`):**
+
+    - Sử dụng `multiprocessing.Pool` để phân phát công việc xử lý từng file media cho các tiến trình con, tận dụng tối đa CPU.
+
+3.  **Triển khai Worker Xử lý Sâu (`processing/worker.py`):**
+    - Mỗi worker là một tiến trình độc lập, tự tải model và kết nối DB.
+    - **Logic Visual Nâng cao:**
+      - Sử dụng `PySceneDetect` để trích xuất các keyframe quan trọng thay vì trích xuất đều đặn.
+      - Tính toán các đặc trưng chất lượng (độ nét, độ sáng) cho mỗi frame.
+      - Tạo vector embedding bằng CLIP.
+      - **Ghi trực tiếp** vector và tất cả metadata vào **Milvus**.
+    - **Logic Audio Nâng cao:**
+      - Sử dụng Whisper để bóc tách lời thoại.
+      - **Ghi trực tiếp** các segment lời thoại vào **Elasticsearch** thông qua `bulk` API.
+      - **(Tùy chọn)** Sử dụng model CLAP để tạo vector cho các sự kiện âm thanh và ghi vào Milvus.
+
+**Kết quả Giai đoạn 1:** Toàn bộ dữ liệu được xử lý và nằm sẵn trong các DB chuyên dụng. Các file `.faiss`, `.json` và các script xử lý tuần tự được loại bỏ hoàn toàn.
+
+---
+
+### **Giai đoạn 2: Xây dựng API Service Hợp nhất (Thay thế Giai đoạn 2 & 3 cũ)**
+
+**Mục tiêu:** Xây dựng một API Service duy nhất bằng FastAPI, có khả năng xử lý toàn bộ luồng tìm kiếm từ đầu đến cuối một cách hiệu quả, sử dụng lập trình bất đồng bộ.
+
+#### **Các bước thực hiện:**
+
+1.  **Tái cấu trúc `services/search_service.py`:**
+
+    - Chuyển đổi các hàm tìm kiếm (`perform_visual_search`, `perform_audio_search`) thành các hàm `async`.
+    - Trong `__init__`, tải tất cả các model cần thiết cho cả việc **recall** (CLIP) và **rerank** (Cross-Encoder) một lần duy nhất khi server khởi động.
+
+2.  **Triển khai Tìm kiếm Bất đồng bộ trong `perform_unified_search`:**
+
+    - Hàm này sẽ là một hàm `async`.
+    - **Bước Recall:**
+      - Tạo vector cho query của người dùng.
+      - Tạo các coroutine task để gọi đến Milvus và Elasticsearch.
+      - Sử dụng `asyncio.gather` để thực thi các task này **cùng một lúc**.
+    - **Bước Fusion:**
+      - Sau khi có kết quả từ các nguồn, sử dụng thuật toán RRF (`_fuse_results_rrf`) để kết hợp chúng thành một danh sách ứng viên (ví dụ: top 100).
+
+3.  **Tích hợp Logic Re-ranking (Phần quan trọng nhất):**
+
+    - Từ danh sách top 100 ứng viên, chuẩn bị dữ liệu (cặp `query` và `media_item`).
+    - Sử dụng model **Cross-Encoder** đã tải sẵn để chấm điểm lại độ tương quan cho 100 ứng viên này. Để tránh block event loop, tác vụ tính toán này có thể được chạy trong một luồng riêng bằng `asyncio.to_thread`.
+    - Kết hợp điểm RRF ban đầu và điểm từ Cross-Encoder để ra điểm số cuối cùng.
+    - Sắp xếp lại lần cuối và trả về top K kết quả.
+
+4.  **Cập nhật `api/api_router.py` và `main_api.py`:**
+    - Đảm bảo endpoint `/search` là một hàm `async` và `await` kết quả từ `search_service`.
+
+**Kết quả Giai đoạn 2:** Có một API duy nhất, hiệu năng cao, tối ưu cho việc xử lý một request, với luồng "Recall -> Fusion -> Rank" rõ ràng.
+
+---
+
+### **Giai đoạn 3: Phân Tích Chuyên Sâu và Tối ưu hóa (Trước là Giai đoạn 4)**
+
+**Mục tiêu:** Thêm các tính năng AI nâng cao và tinh chỉnh hệ thống để đạt độ chính xác tối đa.
+
+#### **Các bước thực hiện:**
+
+1.  **Tạo Endpoint Phân tích `/analyze` (Tùy chọn):**
+
+    - Tạo một endpoint mới trong `api_router.py`.
+    - Dựa trên yêu cầu (`task: "qa"` hoặc `task: "summarize"`), gọi đến các hàm xử lý tương ứng trong `SearchService`.
+    - Các hàm này sẽ sử dụng các model "hạng nặng" khác như LVLM (LLaVA) hoặc LLM chuyên tóm tắt.
+
+2.  **Tinh chỉnh và Tối ưu hóa:**
+    - **Trọng số Fusion:** Tinh chỉnh hằng số `k` trong RRF hoặc thêm trọng số cho từng modality (`visual_score`, `text_score`).
+    - **Trọng số Re-ranking:** Tinh chỉnh trọng số khi kết hợp điểm RRF và điểm Cross-Encoder (`final_score = w1 * rrf_score + w2 * cross_encoder_score`).
+    - **Tối ưu Model:** Sử dụng các kỹ thuật như ONNX, quantization để tăng tốc độ inference của các model AI.
+    - **Tối ưu Truy vấn DB:** Tinh chỉnh các tham số index của Milvus (`nlist`, `efSearch`) và xây dựng các câu query Elasticsearch phức tạp hơn (sử dụng `bool`, `should` để kết hợp nhiều điều kiện).
+
+---
+
+---
+
+### **FILE ĐÃ CHỈNH SỬA: `high_implementation_revised.md`**
 
 ### **Sơ đồ kiến trúc tổng thể (Đã điều chỉnh cho cuộc thi)**
 
@@ -30,7 +135,7 @@
 
 ### **Kiến Trúc End-Product Chi Tiết**
 
-### **Phần 1 (Không đổi về mục tiêu, nhưng bổ sung chi tiết): Pipeline Xử Lý Dữ Liệu Nâng Cao**
+### **Phần 1: Pipeline Xử Lý Dữ Liệu Nâng cao (Offline)**
 
 **Mục tiêu:** Thực hiện **một lần duy nhất (offline)** để biến đổi dữ liệu thô thành các chỉ mục (index) thông minh và giàu thông tin. Đây là giai đoạn quan trọng nhất để tối ưu độ chính xác.
 
@@ -59,7 +164,7 @@
 
 ---
 
-### **Phần 2 (Hoàn toàn mới, thay thế Giai đoạn 2 & 3 cũ): API Service Tìm kiếm Hợp nhất và Tái xếp hạng**
+### **Phần 2: API Service Tìm kiếm Hợp nhất và Tái xếp hạng (Online)**
 
 **Mục tiêu:** Thiết kế một API service duy nhất, hiệu năng cao (sử dụng `asyncio` của Python) để thực hiện toàn bộ luồng tìm kiếm, từ thu hồi ứng viên đến tái xếp hạng và trả về kết quả cuối cùng.
 
@@ -147,31 +252,21 @@ class SearchService:
 
         # Sắp xếp lần cuối và trả về top_k kết quả tốt nhất
         return sorted(final_results, key=lambda x: x.score, reverse=True)[:top_k]
-
 ```
 
 ---
 
-### **Phần 3 (Trước là Giai đoạn 4): Phân Tích Chuyên Sâu (Tính năng mở rộng)**
+### **Phần 3: Phân Tích Chuyên Sâu và Tối ưu hóa (Online)**
 
-**Mục tiêu:** Cung cấp các khả năng tương tác sâu hơn, nếu thời gian cho phép.
+**Mục tiêu:** Cung cấp các khả năng tương tác sâu hơn và tinh chỉnh hệ thống để đạt hiệu năng tối đa.
 
-**Triết lý thiết kế:** Tận dụng các model đã tải sẵn hoặc tải thêm các model lớn (LVLM) để thực hiện các tác vụ phân tích trên một media cụ thể.
+#### **Các hoạt động:**
 
-#### **Các tính năng có thể có:**
+1.  **Endpoint Phân tích `/analyze` (Tùy chọn):**
 
-1.  **Endpoint `POST /analyze`:**
-    - **Visual Question Answering (VQA):** Nhận `media_id`, `timestamp` và một `question`. Service sẽ lấy frame tương ứng, đưa vào một model LVLM (như LLaVA) cùng với câu hỏi để trả về câu trả lời.
-    - **Summarization:** Nhận một `media_id`, lấy toàn bộ transcript từ Elasticsearch và dùng một LLM để tóm tắt nội dung.
+    - Tạo một endpoint mới để thực hiện các tác vụ như Visual Question Answering (dùng LVLM) hoặc tóm tắt video (dùng LLM). Đây là tính năng nâng cao để thể hiện sự vượt trội, nếu thời gian cho phép.
 
----
-
-### **Kết Luận Toàn Bộ Kiến Trúc (Đã điều chỉnh)**
-
-Kiến trúc này tập trung vào những gì quan trọng nhất cho cuộc thi:
-
-1.  **Giai đoạn Offline (Phần 1):** Xây dựng một pipeline xử lý dữ liệu **siêu kỹ lưỡng** để tạo ra các index chất lượng cao nhất có thể. Đây là nền tảng của độ chính xác.
-2.  **Giai đoạn Online (Phần 2):** Xây dựng một API Service **tinh gọn**, sử dụng `asyncio` để tối đa hóa tốc độ phản hồi cho một request.
-3.  **Lõi cạnh tranh (Phần 2 - Re-rank):** Dồn tài nguyên phát triển vào thuật toán **re-ranking**, vì đây là yếu tố quyết định sự khác biệt về chất lượng của các kết quả trả về.
-
-Kiến trúc này loại bỏ sự phức tạp không cần thiết của microservices và Go, giúp bạn tập trung thời gian và công sức vào việc cải thiện mô hình và thuật toán cốt lõi.
+2.  **Tinh chỉnh và Tối ưu hóa (Quan trọng):**
+    - **Trọng số:** Tinh chỉnh các trọng số trong thuật toán fusion (RRF) và re-ranking để phản ánh đúng tầm quan trọng của từng loại điểm số.
+    - **Tối ưu Model:** Sử dụng các kỹ thuật như ONNX, `torch.compile`, quantization để giảm độ trễ của các model AI.
+    - **Tối ưu Truy vấn DB:** Tinh chỉnh các tham số index của Milvus (`nlist`, `efSearch`) và xây dựng các câu query Elasticsearch phức tạp hơn để tăng độ chính xác của bước recall.

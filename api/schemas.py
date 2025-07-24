@@ -45,13 +45,5 @@ class UnifiedResult(BaseModel):
     details: List[MatchDetail]
 
 
-class VisualSearchResponse(BaseModel):
-    results: List[VisualResult]
-
-
-class AudioSearchResponse(BaseModel):
-    results: List[AudioResult]
-
-
 class UnifiedSearchResponse(BaseModel):
     results: List[UnifiedResult]

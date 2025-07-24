@@ -8,27 +8,34 @@ from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 
 
-class ImageProcessor:
-    """Handles basic image processing and CLIP embeddings"""
+class VisionProcessor:
+    """Handles image processing and CLIP embeddings."""
 
-    def __init__(self, model_id: str = "openai/clip-vit-base-patch32"):
-        """
-        Initialize image processor with CLIP model
-
-        Args:
-            model_id: Hugging Face model identifier
-        """
+    def __init__(self, model_id: str):
         self.model_id = model_id
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        print(f"Loading CLIP model: {model_id}")
-        print(f"Device: {self.device}")
-
-        # Load CLIP model and processor
+        print(f"Loading Vision model (CLIP): {model_id} on {self.device}")
         self.model = CLIPModel.from_pretrained(model_id).to(self.device)
         self.processor = CLIPProcessor.from_pretrained(model_id)
+        print("✅ VisionProcessor initialized.")
 
-        print("✅ Image processor initialized")
+    def numpy_array_to_embedding(self, image_array: np.ndarray) -> Optional[np.ndarray]:
+        """Convert a numpy array image to a normalized embedding vector."""
+        try:
+            # Chuyển numpy array thành PIL Image
+            image = Image.fromarray(image_array)
+            inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+
+            with torch.no_grad():
+                image_features = self.model.get_image_features(**inputs)
+
+            # Normalize
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            return image_features.cpu().numpy()
+
+        except Exception as e:
+            print(f"Error processing numpy array image: {e}")
+            return None
 
     def text_to_embedding(self, text: str) -> np.ndarray:
         """
@@ -119,31 +126,6 @@ class ImageProcessor:
         except Exception as e:
             print(f"Error converting image {image_path}: {e}")
             return None
-
-    @staticmethod
-    def get_image_files(
-        directory: str, extensions: tuple = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
-    ) -> List[str]:
-        """
-        Get all image files from directory
-
-        Args:
-            directory: Directory to search
-            extensions: Tuple of valid image extensions
-
-        Returns:
-            List of image file paths
-        """
-        if not os.path.exists(directory):
-            print(f"Directory not found: {directory}")
-            return []
-
-        image_files = []
-        for filename in os.listdir(directory):
-            if filename.lower().endswith(extensions):
-                image_files.append(os.path.join(directory, filename))
-
-        return sorted(image_files)
 
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the loaded model"""

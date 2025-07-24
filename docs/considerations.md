@@ -1,3 +1,16 @@
+core/
+├── **init**.py
+├── search_pipeline/ # <-- THƯ MỤC MỚI
+│ ├── **init**.py
+│ ├── base.py # (Định nghĩa class cơ sở cho một bước)
+│ ├── recall.py # (Processor cho bước Recall)
+│ ├── fusion.py # (Processor cho bước Fusion)
+│ ├── rerank.py # (Processor cho bước Re-rank)
+│ └── format.py # (Processor cho bước định dạng kết quả)
+└── search_service.py # <-- Giờ chỉ là người chạy pipeline
+
+# ... (các file audio.py, video.py, vision.py không đổi)
+
 Video về vòng chung kết năm 2024 cung cấp những bối cảnh vô cùng quý giá. Dựa trên tất cả những thông tin bạn cung cấp, chúng ta sẽ cùng nhau mổ xẻ từng câu hỏi của bạn để vạch ra một chiến lược không chỉ để tham gia, mà là để **chiến thắng**.
 
 ---
@@ -389,4 +402,115 @@ Rõ ràng, việc loại bỏ hoàn toàn LLM sẽ làm hệ thống của bạn
     - **Đóng gói hệ thống chung kết vào Docker.**
     - **Luyện tập:** Tự bấm giờ 5 phút và thử nghiệm với hệ thống chung kết để làm quen với áp lực thời gian.
 
-Bằng cách tiếp cận theo hai pha rõ ràng như vậy, bạn sẽ có một hệ thống cực mạnh để qua vòng loại và một hệ thống cực nhanh để chiến đấu ở vòng chung kết. Chúc bạn thành công
+## Bằng cách tiếp cận theo hai pha rõ ràng như vậy, bạn sẽ có một hệ thống cực mạnh để qua vòng loại và một hệ thống cực nhanh để chiến đấu ở vòng chung kết. Chúc bạn thành công
+
+### **Bản chất của việc tìm kiếm trên Milvus trong hệ thống này**
+
+Khi người dùng nhập query "cô gái mặc váy đỏ đi dạo trên bãi biển", hệ thống sẽ làm 2 việc chính:
+
+1.  **Phía Client (Python):** Dùng model CLIP để biến câu query đó thành một **vector truy vấn (query vector)** duy nhất, ví dụ `[0.12, -0.45, 0.89, ...]`.
+2.  **Phía Milvus (Server):** Nhận vector truy vấn này và thực hiện tìm kiếm **"Những hàng xóm gần nhất" (Nearest Neighbors)**. Nó sẽ so sánh vector truy vấn với **tất cả các vector** đang được lưu trong `visual_collection` (hàng triệu vector từ các frame ảnh) để tìm ra K vector có "khoảng cách" gần nhất.
+    - "Khoảng cách" ở đây thường là độ tương đồng cosine (Cosine Similarity) hoặc Tích vô hướng (Inner Product), vì model CLIP được huấn luyện để các vector của ảnh và text tương đồng sẽ có độ tương đồng cosine cao.
+
+**Vấn đề của cách làm cơ bản này là gì?**
+
+Một vector duy nhất từ câu query "cô gái mặc váy đỏ đi dạo trên bãi biển" là sự **trung bình hóa** của tất cả các khái niệm: "cô gái", "váy đỏ", "đi dạo", "bãi biển". Nó có thể tìm ra:
+
+- Ảnh một bãi biển rất đẹp nhưng không có người. (Khớp "bãi biển")
+- Ảnh một cô gái mặc váy xanh đi trên phố. (Khớp "cô gái", "đi dạo")
+- Ảnh một tấm vải màu đỏ. (Khớp "màu đỏ")
+
+Kết quả trả về có thể đúng một phần, nhưng không hoàn toàn chính xác.
+
+---
+
+### **Tư duy cải thiện: Từ một Collection đơn giản đến một hệ sinh thái thông minh trong Milvus**
+
+Đây là các chiến lược bạn có thể áp dụng, từ đơn giản đến phức tạp, để cải thiện độ chính xác.
+
+#### **Chiến lược 1: Trích xuất và Index Vector đa mức (Multi-level Embedding)**
+
+Đây là cải tiến có tác động lớn nhất. Thay vì chỉ có một `visual_collection` chung chung, hãy tạo ra nhiều collection hoặc sử dụng các trường riêng biệt để biểu diễn các cấp độ thông tin khác nhau.
+
+**Ý tưởng:** Một hình ảnh không chỉ là "một cảnh", mà là "một cảnh chứa nhiều đối tượng".
+
+**Cách thực hiện:**
+
+1.  **Xử lý trong Pipeline (Giai đoạn 1):**
+
+    - Với mỗi keyframe, bạn chạy 2 model:
+      - **CLIP:** Để tạo ra **vector toàn cảnh (global vector)**.
+      - **YOLO (hoặc model nhận dạng đối tượng khác):** Để phát hiện các đối tượng trong ảnh (ví dụ: "person", "car", "dog").
+    - Với mỗi đối tượng được phát hiện, bạn **cắt (crop)** vùng ảnh chứa đối tượng đó ra và tiếp tục dùng **CLIP** để tạo ra một **vector đối tượng (object vector)**.
+
+2.  **Thiết kế Schema Milvus thông minh:**
+    - **Phương án A (Tốt - Dùng một Collection với nhiều trường vector):**
+      - **Lưu ý:** Milvus (từ v2.4) hỗ trợ nhiều trường vector trong cùng một collection.
+      ```
+      visual_collection_v2:
+        - id (PK)
+        - media_id
+        - timestamp
+        - global_vector (FLOAT_VECTOR)  <-- Vector toàn cảnh
+        - object_vector (FLOAT_VECTOR)  <-- Vector của đối tượng
+        - object_class (VARCHAR)        <-- Tên lớp đối tượng, vd: "person", "car"
+      ```
+    - **Phương án B (Rất tốt - Dùng nhiều Collection chuyên biệt):**
+      - `global_frames_collection`: `{id, media_id, timestamp, global_vector}`
+      - `detected_objects_collection`: `{id, media_id, timestamp, object_vector, object_class}`
+
+**Cách tìm kiếm được cải thiện:**
+
+Khi người dùng tìm kiếm "cô gái mặc váy đỏ trên bãi biển":
+
+1.  **Phân rã Query:** Bạn có thể dùng LLM hoặc các quy tắc đơn giản để tách query thành:
+    - Chủ thể/Đối tượng: "cô gái mặc váy đỏ"
+    - Bối cảnh/Cảnh: "bãi biển"
+2.  **Tạo 2 Vector truy vấn:**
+    - `query_vector_object` = CLIP_encode("cô gái mặc váy đỏ")
+    - `query_vector_global` = CLIP_encode("bãi biển")
+3.  **Thực hiện 2 lệnh tìm kiếm song song:**
+    - Tìm `query_vector_object` trong `detected_objects_collection` (hoặc trên trường `object_vector`).
+    - Tìm `query_vector_global` trong `global_frames_collection` (hoặc trên trường `global_vector`).
+4.  **Fusion:** Những `media_id` + `timestamp` nào xuất hiện ở **top đầu của cả hai kết quả tìm kiếm** sẽ là những ứng viên chính xác nhất.
+
+**Lợi ích:** Hệ thống không còn "đoán mò" nữa. Nó tìm kiếm một cách có chủ đích: "tìm một frame có bối cảnh là bãi biển VÀ trong frame đó phải có một đối tượng là cô gái mặc váy đỏ". Độ chính xác tăng vọt.
+
+#### **Chiến lược 2: Sử dụng Partition (Phân vùng) trong Milvus**
+
+**Ý tưởng:** Nếu bạn có các loại media rất khác nhau (ví dụ: phim hoạt hình, tin tức, thể thao), việc tìm kiếm ảnh "cầu thủ bóng đá" trong dữ liệu phim hoạt hình là vô ích.
+
+**Cách thực hiện:**
+
+1.  **Phân loại trước:** Trong pipeline, bạn có thể dùng một model phân loại ảnh/video đơn giản để gán nhãn cho mỗi file media (ví dụ: `category = "sports"`).
+2.  **Tạo Partition trong Milvus:** Milvus cho phép bạn tạo các "phân vùng" logic bên trong một collection. Bạn có thể tạo các partition như `sports`, `news`, `cartoon`.
+3.  **Insert có chỉ định Partition:** Khi ghi dữ liệu vào Milvus, bạn chỉ định vector này thuộc về partition nào.
+
+**Cách tìm kiếm được cải thiện:**
+
+Nếu bạn có thể suy ra danh mục từ query (ví dụ: query chứa từ "Messi"), bạn có thể ra lệnh cho Milvus: "Hãy chỉ tìm kiếm trong partition `sports` thôi". Việc này thu hẹp không gian tìm kiếm một cách drastis, giúp tăng tốc và giảm kết quả nhiễu.
+
+#### **Chiến lược 3: Tận dụng các tham số tìm kiếm nâng cao**
+
+Milvus cung cấp nhiều tham số khi tìm kiếm (`search_params`) có thể ảnh hưởng đến sự cân bằng giữa tốc độ và độ chính xác (recall).
+
+- **`ef` (trong HNSW) hoặc `nprobe` (trong IVF):** Đây là tham số quan trọng nhất.
+  - `ef` / `nprobe` càng **thấp**: Tìm kiếm càng nhanh, nhưng có nguy cơ bỏ lỡ một vài kết quả tốt.
+  - `ef` / `nprobe` càng **cao**: Tìm kiếm chậm hơn một chút, nhưng "quét" kỹ hơn và có khả năng tìm thấy các kết quả chính xác cao hơn.
+
+**Cách cải thiện:**
+
+Trong kiến trúc **Recall-then-Rank**, bạn có thể chấp nhận một chút sai sót ở bước Recall để nó diễn ra thật nhanh.
+
+- Đặt `ef` ở mức vừa phải (ví dụ: 64, 128) để lấy nhanh top 100-200 ứng viên.
+- Sau đó, dồn toàn bộ sức mạnh tính toán vào bước Re-ranking (dùng Cross-Encoder) để sắp xếp lại 100-200 ứng viên này một cách cực kỳ chính xác.
+
+### **Tổng kết tư duy cải thiện Milvus:**
+
+1.  **Đừng coi Milvus là một cái hộp đen:** Hãy hiểu rằng nó chỉ đang tìm "hàng xóm gần nhất".
+2.  **Làm giàu thông tin đầu vào:** Thay vì một vector duy nhất cho một frame, hãy cung cấp cho Milvus nhiều loại vector (toàn cảnh, đối tượng) và metadata (lớp đối tượng, chất lượng ảnh).
+3.  **Cấu trúc hóa dữ liệu:** Sử dụng nhiều collection hoặc partition để phân nhóm dữ liệu một cách logic.
+4.  **Tìm kiếm có chủ đích:** Thay vì một query chung chung, hãy thực hiện nhiều lệnh tìm kiếm chuyên biệt trên các collection/partition/trường vector khác nhau rồi kết hợp kết quả lại.
+5.  **Cân bằng Tốc độ/Độ chính xác:** Tinh chỉnh các tham số tìm kiếm để phù hợp với kiến trúc Recall-then-Rank của bạn.
+
+Bằng cách áp dụng những tư duy này, bạn sẽ biến Milvus từ một công cụ tìm kiếm vector đơn thuần thành một bộ não truy vấn thông tin hình ảnh thực sự mạnh mẽ.

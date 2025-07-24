@@ -1,39 +1,58 @@
-import os
-import sys
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from api.api_router import router as api_router
 import config
-from main_api import run_server
 
 
-def main():
-    """
-    Điểm khởi đầu chính của ứng dụng.
-    Kiểm tra các file index và khởi động API server.
-    """
-    print("--- AI Multimodal Search Server ---")
+def create_app() -> FastAPI:
+    """Tạo và cấu hình ứng dụng FastAPI."""
+    app = FastAPI(
+        title="AI Multimodal Search API",
+        description="""
+        🔍 **AI-powered multimodal search API**
+        
+        Search through images and videos using natural language descriptions.
+        Powered by OpenAI's CLIP, Whisper, and FAISS.
+        
+        **Features:**
+        - 🖼️ Visual search using text descriptions (for images and video frames)
+        - 🗣️ Audio search in video transcripts
+        - 🚀 Unified search combining visual and audio modalities
+        """,
+        version="2.2.0-refactored",
+    )
 
-    required_files = [config.VISUAL_INDEX_FILE, config.MEDIA_DATA_MAPPING_FILE]
-    missing_files = [f for f in required_files if not os.path.exists(f)]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-    if missing_files:
-        print("\n" + "=" * 60)
-        print("❌ CRITICAL ERROR: Index files not found!")
-        print("The following required files are missing:")
-        for f in missing_files:
-            print(f"  - {f}")
-        print("\n👉 Please build the index first by running:")
-        print("   python build_index.py")
-        print("=" * 60)
-        sys.exit(1)
+    # Gắn router vào ứng dụng
+    app.include_router(api_router)
 
-    print("\n✅ All required index files found. Initializing server...")
-
-    try:
-        run_server()
-    except Exception as e:
-        print(f"\n❌ An unexpected error occurred during server startup: {e}")
-        print("Please check your configuration and the error logs.")
-        sys.exit(1)
+    return app
 
 
+app = create_app()
+
+
+def run_server():
+    """Chạy API server."""
+    print("🚀 Starting API server...")
+    print(f"Server running at: http://{config.API_HOST}:{config.API_PORT}")
+    print(f"Access API docs at: http://{config.API_HOST}:{config.API_PORT}/docs")
+    uvicorn.run(
+        "main_api:app",
+        host=config.API_HOST,
+        port=config.API_PORT,
+    )
+
+
+# File `main.py` sẽ gọi hàm này thay vì class
+# Hoặc có thể chạy trực tiếp file này
 if __name__ == "__main__":
-    main()
+    run_server()

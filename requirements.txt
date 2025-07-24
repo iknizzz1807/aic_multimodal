@@ -1,0 +1,19 @@
+faiss-cpu==1.11.0
+fastapi==0.110.0
+numpy==1.26.4
+openai-whisper==20250625
+opencv-python==4.10.0.84
+opencv-python-headless==4.11.0.86
+Pillow==10.3.0
+pydantic==2.9.2
+torch==2.7.1+cu126
+torch
+torchvision
+torchaudio
+transformers==4.46.1
+uvicorn==0.32.0
+# Cài cái elasticsearch thì disable cái lite đi
+elasticsearch==8.17.0
+grpcio==1.50.0
+grpcio-tools==1.50.0
+protobuf==4.25.3
