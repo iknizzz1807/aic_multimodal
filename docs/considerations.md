@@ -1,20 +1,3 @@
-core/
-├── **init**.py
-├── search_pipeline/ # <-- THƯ MỤC MỚI
-│ ├── **init**.py
-│ ├── base.py # (Định nghĩa class cơ sở cho một bước)
-│ ├── recall.py # (Processor cho bước Recall)
-│ ├── fusion.py # (Processor cho bước Fusion)
-│ ├── rerank.py # (Processor cho bước Re-rank)
-│ └── format.py # (Processor cho bước định dạng kết quả)
-└── search_service.py # <-- Giờ chỉ là người chạy pipeline
-
-# ... (các file audio.py, video.py, vision.py không đổi)
-
-Video về vòng chung kết năm 2024 cung cấp những bối cảnh vô cùng quý giá. Dựa trên tất cả những thông tin bạn cung cấp, chúng ta sẽ cùng nhau mổ xẻ từng câu hỏi của bạn để vạch ra một chiến lược không chỉ để tham gia, mà là để **chiến thắng**.
-
----
-
 ### **Câu hỏi 1: "Tôi đã đi đúng hướng chưa?"**
 
 **Câu trả lời ngắn gọn: Rồi, và còn hơn cả đúng hướng.**

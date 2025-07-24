@@ -28,12 +28,20 @@ class AudioResult(BaseModel):
     end: float
 
 
+class AudioEventResult(BaseModel):
+    id: str
+    score: float
+    start: float
+    end: float
+
+
 class MatchDetail(BaseModel):
     type: str
     timestamp: Optional[float] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
-    text_match: Optional[str] = None
+    # Đổi tên text_match để tổng quát hơn
+    match_content: Optional[str] = None
     score: float
 
 

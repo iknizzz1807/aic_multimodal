@@ -46,7 +46,7 @@ def run_server():
     print(f"Server running at: http://{config.API_HOST}:{config.API_PORT}")
     print(f"Access API docs at: http://{config.API_HOST}:{config.API_PORT}/docs")
     uvicorn.run(
-        "main_api:app",
+        "main:app",
         host=config.API_HOST,
         port=config.API_PORT,
     )

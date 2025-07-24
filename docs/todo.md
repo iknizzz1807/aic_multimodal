@@ -1,0 +1,2 @@
+- Trích xuất Keyframe thông minh: Hiện tại core/video.py đang trích xuất frame theo một chu kỳ cố định (frame_interval). Plan có đề cập đến việc dùng PySceneDetect để chỉ lấy những frame đại diện cho sự thay đổi cảnh, giúp giảm nhiễu và số lượng vector không cần thiết.
+- Nhận dạng sự kiện âm thanh: dùng model CLAP để nhận dạng các âm thanh không phải lời nói (tiếng vỗ tay, tiếng xe, tiếng nổ...).

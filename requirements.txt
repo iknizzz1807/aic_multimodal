@@ -17,3 +17,6 @@ elasticsearch==8.17.0
 grpcio==1.50.0
 grpcio-tools==1.50.0
 protobuf==4.25.3
+scenedetect
+laion-clap
+ffmpeg-python
