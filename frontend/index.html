@@ -10,7 +10,9 @@
     <div class="container">
       <header>
         <h1>AI Multimodal Search</h1>
-        <p>Search through images and videos using natural language</p>
+        <p>
+          Search through images and videos using natural language descriptions.
+        </p>
       </header>
 
       <div class="search-section">
@@ -18,26 +20,13 @@
           <input
             type="text"
             id="searchInput"
-            placeholder="Describe what you're looking for... (e.g., 'a person walking', 'red car')"
+            placeholder="Describe what you're looking for... (e.g., 'a person walking', 'a dog barking')"
             autocomplete="off"
           />
           <button id="searchBtn" onclick="search()">Search</button>
         </div>
 
-        <div class="search-modes">
-          <label>
-            <input type="radio" name="searchType" value="unified" checked />
-            Unified
-          </label>
-          <label>
-            <input type="radio" name="searchType" value="visual" />
-            Visual Only
-          </label>
-          <label>
-            <input type="radio" name="searchType" value="audio" />
-            Audio Only
-          </label>
-        </div>
+        <!-- Search Modes have been removed as the new API uses a single unified endpoint -->
 
         <div class="options">
           <label
@@ -53,10 +42,16 @@
         </div>
       </div>
 
-      <div id="results" class="results-grid"></div>
+      <div id="results" class="results-grid">
+        <!-- Search results will be dynamically inserted here -->
+        <div class="placeholder">
+          <h2>Your search results will appear here</h2>
+          <p>Try one of the sample queries below to get started.</p>
+        </div>
+      </div>
     </div>
 
-    <!-- NEW: Modal Structure -->
+    <!-- Modal Structure for detailed view -->
     <div id="mediaModal" class="modal">
       <div class="modal-content">
         <span class="modal-close" onclick="closeModal()">×</span>
@@ -67,7 +62,9 @@
           </div>
           <div id="modalDetails" class="modal-details">
             <h4>Matching Moments</h4>
-            <!-- Match details (timestamps, text) will be injected here -->
+            <div id="modalDetailsContent">
+              <!-- Match details (timestamps, text) will be injected here -->
+            </div>
           </div>
         </div>
       </div>

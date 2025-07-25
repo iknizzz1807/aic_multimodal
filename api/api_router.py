@@ -14,13 +14,13 @@ router = APIRouter()
 
 
 @router.get("/")
-def root(service: SearchService = Depends(get_search_service)):
+async def root(service: SearchService = Depends(get_search_service)):
     """Kiểm tra health và thông tin cơ bản của API."""
-    return service.get_server_info()
+    return await service.get_server_info()
 
 
-@router.post("/search", response_model=UnifiedSearchResponse)  # Đổi tên thành /search
-async def unified_search(  # Thêm async
+@router.post("/search", response_model=UnifiedSearchResponse)
+async def unified_search(
     query: SearchQuery, service: SearchService = Depends(get_search_service)
 ):
     """Thực hiện tìm kiếm hợp nhất trên cả hình ảnh và âm thanh."""

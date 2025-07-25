@@ -17,7 +17,7 @@ CLAP_EMBEDDING_DIM = 512  # HTSAT-base model embedding dimension
 CROSS_ENCODER_MODEL_ID = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Số lượng processing worker
-PROCESSING_WORKERS = 4  # <-- Thay đổi tuỳ theo độ trâu của máy =))
+PROCESSING_WORKERS = 2  # <-- Thay đổi tuỳ theo độ trâu của máy =))
 
 # --- Cấu hình DB ---
 # Milvus

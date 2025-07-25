@@ -1,84 +1,47 @@
-// File: src/frontend/script.js (MODIFIED)
 const API_BASE_URL = "http://127.0.0.1:8000";
-const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv"];
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".avi", ".mkv", ".webm"];
 
+// DOM Elements
 const searchInput = document.getElementById("searchInput");
 const searchBtn = document.getElementById("searchBtn");
 const topKSelect = document.getElementById("topK");
 const statusElement = document.getElementById("status");
 const resultsContainer = document.getElementById("results");
 
-// NEW: Modal elements
+// Modal Elements
 const modal = document.getElementById("mediaModal");
 const modalTitle = document.getElementById("modalTitle");
 const modalMediaContainer = document.getElementById("modalMediaContainer");
-const modalDetails = document.getElementById("modalDetails");
-let currentResults = []; // Store current search results
+const modalDetailsContent = document.getElementById("modalDetailsContent");
 
+// State
+let currentResults = [];
+
+// Event Listeners
 searchInput.addEventListener("keypress", (e) => e.key === "Enter" && search());
 window.addEventListener("load", () => {
   checkApiStatus();
   addSampleQueries();
 });
-// When the user clicks anywhere outside of the modal, close it
-window.onclick = function (event) {
+window.onclick = (event) => {
   if (event.target == modal) {
     closeModal();
   }
 };
 
-const sampleQueries = [
-  "a cat sleeping",
-  "a person walking on the beach",
-  "someone talking about technology",
-  "red car on a street",
-  "dog playing in a park",
-];
-
-function addSampleQueries() {
-  const searchSection = document.querySelector(".search-section");
-  const samplesDiv = document.createElement("div");
-  samplesDiv.className = "sample-queries";
-  samplesDiv.innerHTML = `
-    <p style="margin-bottom: 10px; color: #666; font-size: 14px;">Try these examples:</p>
-    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-      ${sampleQueries
-        .map(
-          (query) =>
-            `<button class="sample-btn" onclick="searchSample('${query}')">${query}</button>`
-        )
-        .join("")}
-    </div>`;
-  searchSection.appendChild(samplesDiv);
-}
-
-function searchSample(query) {
-  searchInput.value = query;
-  search();
-}
+// --- Core Functions ---
 
 async function search() {
   const query = searchInput.value.trim();
   if (!query) {
-    showStatus("Please enter a search query", "error");
+    showStatus("Please enter a search query.", "error");
     return;
   }
 
   const topK = parseInt(topKSelect.value);
-  const searchType = document.querySelector(
-    'input[name="searchType"]:checked'
-  ).value;
+  const endpoint = "/search"; // The API now uses a single, unified endpoint
 
-  const endpointMap = {
-    unified: "/unified_search",
-    visual: "/search_visual",
-    audio: "/search_audio",
-  };
-  const endpoint = endpointMap[searchType];
-
-  searchBtn.disabled = true;
-  searchBtn.textContent = "Searching...";
-  showStatus(`Searching for "${query}"...`, "loading");
+  setLoadingState(true, query);
   resultsContainer.innerHTML = "";
 
   try {
@@ -96,61 +59,47 @@ async function search() {
     }
 
     const data = await response.json();
-    currentResults = data.results; // Store results
-    displayResults(currentResults, query, searchType);
+    currentResults = data.results;
+    displayResults(currentResults, query);
   } catch (error) {
     console.error("Search error:", error);
-    showError(`Failed to search: ${error.message}`);
+    showError(`Failed to perform search. ${error.message}`);
   } finally {
-    searchBtn.disabled = false;
-    searchBtn.textContent = "Search";
+    setLoadingState(false);
   }
 }
 
-function displayResults(results, query, searchType) {
+function displayResults(results, query) {
   if (!results || results.length === 0) {
     showNoResults(query);
     return;
   }
 
-  showStatus(`Found ${results.length} results`, "success");
+  showStatus(`Found ${results.length} results.`, "success");
 
-  const displayFunctionMap = {
-    unified: displayUnifiedResults,
-    visual: displayVisualResults,
-    audio: displayAudioResults,
-  };
-
-  displayFunctionMap[searchType](results);
+  const resultsHtml = results
+    .map((result, index) => renderResultItem(result, index))
+    .join("");
+  resultsContainer.innerHTML = resultsHtml;
 }
+
+// --- Result Rendering Functions ---
 
 const placeholderImage =
-  "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPkltYWdlIG5vdCBmb3VuZDwvdGV4dD48L3N2Zz4=";
+  "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPlRodW1ibmFpbCBsb2FkaW5n...PC90ZXh0Pjwvc3ZnPg==";
 
-function createFadeInAnimation() {
-  if (!document.querySelector("#animations")) {
-    const style = document.createElement("style");
-    style.id = "animations";
-    style.textContent = `
-      @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-      }`;
-    document.head.appendChild(style);
-  }
-}
-
-function displayUnifiedResults(results) {
-  createFadeInAnimation();
-  resultsContainer.innerHTML = results
-    .map(
-      (r, i) => `
-    <div class="result-item" style="animation: fadeInUp 0.3s ease ${
+function renderResultItem(r, i) {
+  const isVideo = VIDEO_EXTENSIONS.some((ext) =>
+    r.id.toLowerCase().endsWith(ext)
+  );
+  return `
+    <div class="result-item" style="animation-delay: ${
       i * 0.05
-    }s both;" onclick="openModal(${i})">
+    }s;" onclick="openModal(${i})">
       <img class="result-image" src="${r.image || placeholderImage}" alt="${
-        r.id
-      }" loading="lazy"/>
+    r.id
+  }" loading="lazy" onerror="this.src='${placeholderImage}'"/>
+      ${isVideo ? '<div class="video-indicator">▶</div>' : ""}
       <div class="result-info">
         <div>
           <div class="result-path">${r.id}</div>
@@ -158,62 +107,20 @@ function displayUnifiedResults(results) {
             ${r.reason
               .map(
                 (reason) =>
-                  `<span class="reason-tag ${reason}">${reason}</span>`
+                  `<span class="reason-tag ${reason.replace(
+                    "_",
+                    "-"
+                  )}">${reason}</span>`
               )
               .join("")}
           </div>
         </div>
-        <span class="result-score">Score: ${(r.score * 100).toFixed(1)}%</span>
+        <span class="result-score">Score: ${r.score.toFixed(3)}</span>
       </div>
-    </div>
-  `
-    )
-    .join("");
+    </div>`;
 }
 
-function displayVisualResults(results) {
-  createFadeInAnimation();
-  resultsContainer.innerHTML = results
-    .map(
-      (r, i) => `
-    <div class="result-item" style="animation: fadeInUp 0.3s ease ${
-      i * 0.05
-    }s both;">
-      <img class="result-image" src="${r.image || placeholderImage}" alt="${
-        r.id
-      }" loading="lazy"/>
-      <div class="result-info">
-        <div class="result-path">${r.id} ${
-        r.timestamp ? `<span>@ ${r.timestamp.toFixed(1)}s</span>` : ""
-      }</div>
-        <span class="result-score">Similarity: ${r.score.toFixed(3)}</span>
-      </div>
-    </div>
-  `
-    )
-    .join("");
-}
-
-function displayAudioResults(results) {
-  createFadeInAnimation();
-  resultsContainer.innerHTML = results
-    .map(
-      (r, i) => `
-    <div class="result-item audio-result-item" style="animation: fadeInUp 0.3s ease ${
-      i * 0.05
-    }s both;">
-      <div class="result-path">${r.id}</div>
-      <p class="audio-match-text">"${r.match}"</p>
-      <div class="audio-time">Time: ${r.start.toFixed(1)}s - ${r.end.toFixed(
-        1
-      )}s</div>
-    </div>
-  `
-    )
-    .join("");
-}
-
-// --- NEW MODAL FUNCTIONS ---
+// --- Modal Functions ---
 
 function openModal(resultIndex) {
   const result = currentResults[resultIndex];
@@ -221,112 +128,168 @@ function openModal(resultIndex) {
 
   const mediaUrl = `${API_BASE_URL}/media/${result.id}`;
   modalTitle.textContent = result.id;
-  modalMediaContainer.innerHTML = ""; // Clear previous content
-  document.querySelector("#modalDetails > div")?.remove(); // Clear previous details
+  modalMediaContainer.innerHTML = "";
+  modalDetailsContent.innerHTML = "";
 
   const isVideo = VIDEO_EXTENSIONS.some((ext) =>
     result.id.toLowerCase().endsWith(ext)
   );
 
   if (isVideo) {
-    modalMediaContainer.innerHTML = `<video id="modalVideoPlayer" src="${mediaUrl}" controls autoplay muted></video>`;
+    modalMediaContainer.innerHTML = `<video id="modalVideoPlayer" src="${mediaUrl}" controls autoplay muted loop></video>`;
   } else {
     modalMediaContainer.innerHTML = `<img src="${mediaUrl}" alt="${result.id}" />`;
   }
 
-  const detailsContainer = document.createElement("div");
-  modalDetails.appendChild(detailsContainer);
-
+  // Populate matching moments from the new 'details' structure
   if (result.details && result.details.length > 0) {
-    detailsContainer.innerHTML = result.details
+    modalDetailsContent.innerHTML = result.details
       .map((detail) => {
         let timeInfo,
           textInfo = "";
-        if (detail.type === "visual") {
-          timeInfo = `@ ${detail.timestamp.toFixed(1)}s`;
-        } else {
-          timeInfo = `${detail.start_time.toFixed(
-            1
-          )}s - ${detail.end_time.toFixed(1)}s`;
-          textInfo = `<span class="detail-item-text">"${detail.text_match}"</span>`;
-        }
-
         const seekTime =
           detail.type === "visual" ? detail.timestamp : detail.start_time;
 
+        if (detail.type === "visual") {
+          timeInfo = `@ ${detail.timestamp.toFixed(1)}s`;
+          textInfo = `<span class="detail-item-text">Visual match</span>`;
+        } else {
+          // 'audio' or 'audio_event'
+          timeInfo = `${detail.start_time.toFixed(
+            1
+          )}s - ${detail.end_time.toFixed(1)}s`;
+          if (detail.match_content) {
+            textInfo = `<span class="detail-item-text">"${detail.match_content}"</span>`;
+          }
+        }
+
         return `
           <div class="detail-item" onclick="seekMedia(${seekTime})">
-            <span class="reason-tag ${detail.type}">${detail.type}</span>
+            <span class="reason-tag ${detail.type.replace(
+              "_",
+              "-"
+            )}">${detail.type.replace("_", " ")}</span>
             <span class="detail-item-time">${timeInfo}</span>
             ${textInfo}
-          </div>
-        `;
+          </div>`;
       })
       .join("");
   } else {
-    detailsContainer.innerHTML = "<p>No specific match details available.</p>";
+    modalDetailsContent.innerHTML =
+      "<p>No specific match details available for this item.</p>";
   }
 
-  modal.style.display = "block";
+  modal.style.display = "flex";
+  document.body.style.overflow = "hidden";
 }
 
 function closeModal() {
   modal.style.display = "none";
-  modalMediaContainer.innerHTML = ""; // Stop video/image loading
+  document.body.style.overflow = "auto";
+  // Pause and clean up media to stop background loading/playing
+  const video = document.getElementById("modalVideoPlayer");
+  if (video) video.pause();
+  modalMediaContainer.innerHTML = "";
 }
 
 function seekMedia(time) {
   const videoPlayer = document.getElementById("modalVideoPlayer");
   if (videoPlayer) {
-    videoPlayer.currentTime = time;
-    videoPlayer.play();
+    // Ensure time is a valid number before seeking
+    if (typeof time === "number" && !isNaN(time)) {
+      videoPlayer.currentTime = time;
+      videoPlayer.play();
+    }
   }
 }
 
-// --- END NEW MODAL FUNCTIONS ---
+// --- UI & UX Helper Functions ---
+
+function addSampleQueries() {
+  const sampleQueries = [
+    "a cat sleeping",
+    "a person walking on the beach",
+    "someone talking about technology",
+    "red car on a street",
+    "dog playing in a park",
+    "sound of a car engine",
+  ];
+  const searchSection = document.querySelector(".search-section");
+  const samplesDiv = document.createElement("div");
+  samplesDiv.className = "sample-queries";
+  samplesDiv.innerHTML = `
+    <p>Try these examples:</p>
+    <div>${sampleQueries
+      .map(
+        (q) =>
+          `<button class="sample-btn" onclick="searchSample('${q}')">${q}</button>`
+      )
+      .join("")}</div>`;
+  searchSection.appendChild(samplesDiv);
+}
+
+function searchSample(query) {
+  searchInput.value = query;
+  search();
+}
+
+function setLoadingState(isLoading, query = "") {
+  searchBtn.disabled = isLoading;
+  if (isLoading) {
+    searchBtn.textContent = "Searching...";
+    showStatus(`Searching for "${query}"...`, "loading");
+  } else {
+    searchBtn.textContent = "Search";
+  }
+}
 
 function showNoResults(query) {
   resultsContainer.innerHTML = `
     <div class="no-results">
       <h3>No results found for "${query}"</h3>
-      <p>Try different keywords or check if media has been indexed.</p>
+      <p>Try different keywords, or check if your media has been processed and indexed.</p>
     </div>`;
-  showStatus("No results found", "error");
+  showStatus("No results found.", "error");
 }
 
 function showError(message) {
   resultsContainer.innerHTML = `
     <div class="error-message">
-      <h3>⚠️ Error</h3>
+      <h3>⚠️ An Error Occurred</h3>
       <p>${message}</p>
-      <p style="margin-top: 10px; font-size: 14px;">Make sure the API server is running at ${API_BASE_URL}</p>
+      <p>Please ensure the backend server is running at <strong>${API_BASE_URL}</strong> and is accessible.</p>
     </div>`;
-  showStatus("Search failed", "error");
+  showStatus("Search failed.", "error");
 }
 
 function showStatus(message, type) {
   statusElement.textContent = message;
   statusElement.className = `status ${type}`;
+  // Clear status after a few seconds unless it's a loading message
   if (type !== "loading") {
     setTimeout(() => {
       if (statusElement.textContent === message) {
         statusElement.textContent = "";
         statusElement.className = "status";
       }
-    }, 4000);
+    }, 5000);
   }
 }
 
 async function checkApiStatus() {
   try {
-    const response = await fetch(API_BASE_URL);
+    // The new backend has a GET / health check endpoint
+    const response = await fetch(`${API_BASE_URL}/`);
     if (response.ok) {
-      showStatus("API connected", "success");
+      showStatus("API Connected", "success");
     } else {
-      throw new Error("Server responded but not OK");
+      throw new Error(`Server responded with status: ${response.status}`);
     }
   } catch (error) {
-    showStatus("API connection failed", "error");
-    showError("Could not connect to the backend API.");
+    console.error("API Status Check Error:", error);
+    showStatus("API Connection Failed", "error");
+    showError(
+      "Could not connect to the backend API. Please make sure the server is running and there are no CORS issues."
+    );
   }
 }
